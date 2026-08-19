@@ -1,0 +1,58 @@
+{
+  "name": "codeforces-stats-card",
+  "version": "1.0.0",
+  "description": "A self-contained React card that shows a Codeforces user's total solved problems and their contest-rating history graph. Just pass a handle.",
+  "type": "module",
+  "main": "./dist/codeforces-stats-card.cjs",
+  "module": "./dist/codeforces-stats-card.js",
+  "exports": {
+    ".": {
+      "import": "./dist/codeforces-stats-card.js",
+      "require": "./dist/codeforces-stats-card.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "prepublishOnly": "vite build"
+  },
+  "keywords": [
+    "react",
+    "codeforces",
+    "competitive-programming",
+    "card",
+    "component",
+    "rating",
+    "stats"
+  ],
+  "author": "Ryan Westfall",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Ryan-Westfall/codeforces-stats-card.git"
+  },
+  "homepage": "https://github.com/Ryan-Westfall/codeforces-stats-card#readme",
+  "bugs": {
+    "url": "https://github.com/Ryan-Westfall/codeforces-stats-card/issues"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "vite": "^5.4.11"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
