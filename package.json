@@ -1,6 +1,6 @@
 {
   "name": "codeforces-stats-card",
-  "version": "1.0.0",
+  "version": "1.8.0",
   "description": "A self-contained React card that shows a Codeforces user's total solved problems and their contest-rating history graph. Just pass a handle.",
   "type": "module",
   "main": "./dist/codeforces-stats-card.cjs",

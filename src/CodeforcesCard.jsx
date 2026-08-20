@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { injectStyles } from './styles.js';
-import { rankColor, rankFromRating } from './ranks.js';
+import { rankColor, rankFromRating, ratingBuckets } from './ranks.js';
 
 const API = 'https://codeforces.com/api';
 
@@ -12,23 +12,57 @@ async function fetchJSON(url, signal) {
   return json.result;
 }
 
+// Reduce a list of submissions into attempt / solve stats plus the list of
+// difficulty ratings for every distinct solved problem (used to build the
+// distribution once the user's own rating is known).
+function summarize(submissions) {
+  const attempted = new Set();
+  const solved = new Set();
+  const solvedRating = new Map(); // problem key -> problem rating (if any)
+
+  for (const sub of submissions) {
+    if (!sub.problem) continue;
+    const key = `${sub.problem.contestId || 'x'}-${sub.problem.index}`;
+    attempted.add(key);
+    if (sub.verdict === 'OK' && !solved.has(key)) {
+      solved.add(key);
+      if (typeof sub.problem.rating === 'number') solvedRating.set(key, sub.problem.rating);
+    }
+  }
+
+  return {
+    attempted: attempted.size,
+    solved: solved.size,
+    solvedRatings: [...solvedRating.values()],
+  };
+}
+
+// Tally solved-problem ratings into the five numeric rating ranges closest to
+// the user's current rating.
+function distributionFor(rating, solvedRatings) {
+  const buckets = ratingBuckets(rating).map((b) => ({ ...b, count: 0 }));
+  for (const r of solvedRatings) {
+    const bucket = buckets.find((b) => r >= b.min && r <= b.max);
+    if (bucket) bucket.count += 1;
+  }
+  return buckets;
+}
+
 /**
- * A self-contained card showing a Codeforces user's total solved problems
- * and their contest-rating history graph.
+ * A self-contained card showing a Codeforces user's problem-solving stats
+ * (attempted, solved, a per-rating distribution), contest rating, and
+ * contest-rating history graph.
  *
  * @param {object} props
  * @param {string} props.handle            Codeforces handle (required).
- * @param {'light'|'dark'} [props.theme]   Color theme. Default 'light'.
  * @param {string} [props.title]           Card title. Default 'Codeforces'.
- * @param {boolean} [props.showRank]       Show the rank badge + max rating. Default true.
- * @param {number} [props.maxSubmissions]  How many recent submissions to scan when
- *                                         counting solved problems. Default 10000.
+ * @param {boolean} [props.showRank]       Show the rank name next to the rating. Default true.
+ * @param {number} [props.maxSubmissions]  How many recent submissions to scan. Default 10000.
  * @param {string} [props.className]       Extra class names for the root element.
  * @param {React.CSSProperties} [props.style] Inline styles for the root element.
  */
 export default function CodeforcesCard({
   handle,
-  theme = 'light',
   title = 'Codeforces',
   showRank = true,
   maxSubmissions = 10000,
@@ -65,18 +99,11 @@ export default function CodeforcesCard({
         const info = infoArr && infoArr[0];
         if (!info) throw new Error(`Handle "${handle}" not found.`);
 
-        const solvedSet = new Set();
-        for (const sub of submissions) {
-          if (sub.verdict === 'OK' && sub.problem) {
-            solvedSet.add(`${sub.problem.contestId || 'x'}-${sub.problem.index}`);
-          }
-        }
-
         setState({
           status: 'ready',
           info,
           history: history || [],
-          solved: solvedSet.size,
+          stats: summarize(submissions || []),
         });
       } catch (err) {
         if (err.name === 'AbortError') return;
@@ -87,13 +114,13 @@ export default function CodeforcesCard({
     return () => controller.abort();
   }, [handle, maxSubmissions]);
 
-  const rootClass = `cfsc-card cfsc-theme-${theme} ${className}`.trim();
+  const rootClass = `cfsc-card ${className}`.trim();
   const profileUrl = `https://codeforces.com/profile/${encodeURIComponent(handle || '')}`;
 
   if (state.status === 'loading') {
     return (
       <div className={rootClass} style={style}>
-        <Header title={title} profileUrl={profileUrl} />
+        <Header title={title} handle={handle} profileUrl={profileUrl} />
         <div className="cfsc-message">Loading Codeforces stats…</div>
       </div>
     );
@@ -102,58 +129,108 @@ export default function CodeforcesCard({
   if (state.status === 'error') {
     return (
       <div className={rootClass} style={style}>
-        <Header title={title} profileUrl={profileUrl} />
+        <Header title={title} handle={handle} profileUrl={profileUrl} />
         <div className="cfsc-message cfsc-error">{state.error}</div>
       </div>
     );
   }
 
-  const { info, history, solved } = state;
+  const { info, history, stats } = state;
   const rating = info.rating ?? 0;
   const maxRating = info.maxRating ?? rating;
   const rankName = info.rank || rankFromRating(rating);
+  const acceptance = stats.attempted ? Math.round((stats.solved / stats.attempted) * 100) : 0;
+  const buckets = distributionFor(rating, stats.solvedRatings);
 
   return (
     <a className={rootClass} style={style} href={profileUrl} target="_blank" rel="noopener noreferrer">
-      <Header title={title} />
+      <Header title={title} handle={info.handle || handle} />
 
-      <div className="cfsc-solved">
-        <span className="cfsc-solved-value">{solved}</span>
-        <span className="cfsc-solved-label">Problems Solved</span>
-      </div>
-
-      <div className="cfsc-rating-row">
-        <div className="cfsc-rating-block">
-          <span className="cfsc-rating-value" style={{ color: rankColor(rating) }}>
-            {rating}
-          </span>
-          <span className="cfsc-rating-caption">Contest Rating</span>
-        </div>
-        {showRank && (
-          <div className="cfsc-rank-block">
-            <span className="cfsc-rank-badge" style={{ color: rankColor(rating) }}>
-              {rankName}
-            </span>
-            <span className="cfsc-max-rating">
-              Max <strong style={{ color: rankColor(maxRating) }}>{maxRating}</strong>
-            </span>
+      <div className="cfsc-body">
+        {/* Section 1 — Problems attempted */}
+        <section className="cfsc-section cfsc-section--attempts">
+          <div className="cfsc-stat">
+            <span className="cfsc-stat-value">{stats.attempted}</span>
+            <span className="cfsc-stat-label">Attempted</span>
           </div>
-        )}
-      </div>
+          <div className="cfsc-stat">
+            <span className="cfsc-stat-value">{stats.solved}</span>
+            <span className="cfsc-stat-label">Solved</span>
+          </div>
+          <div className="cfsc-stat">
+            <span className="cfsc-stat-value">{acceptance}%</span>
+            <span className="cfsc-stat-label">Acceptance</span>
+          </div>
+        </section>
 
-      <RatingGraph history={history} currentRating={rating} />
+        {/* Section 2 — Solved problems by rating range */}
+        <section className="cfsc-section">
+          <div className="cfsc-section-title">Solved by Problem Rating</div>
+          <Distribution buckets={buckets} />
+        </section>
+
+        {/* Section 3 — Contest rating (current + max) with history graph */}
+        <section className="cfsc-section cfsc-section--graph">
+          <div className="cfsc-section-title">Contest Rating</div>
+          <div className="cfsc-rating-grid">
+            <div className="cfsc-stat">
+              <span className="cfsc-stat-value">{rating}</span>
+              <span className="cfsc-stat-label">
+                Current
+                {showRank && (
+                  <>
+                    {' · '}
+                    <span style={{ color: rankColor(rating) }}>{rankName}</span>
+                  </>
+                )}
+              </span>
+            </div>
+            <div className="cfsc-stat">
+              <span className="cfsc-stat-value">{maxRating}</span>
+              <span className="cfsc-stat-label">Max</span>
+            </div>
+          </div>
+          <RatingGraph history={history} />
+        </section>
+      </div>
     </a>
   );
 }
 
-function Header({ title, profileUrl }) {
+function Distribution({ buckets }) {
+  const max = Math.max(1, ...buckets.map((b) => b.count));
+  const total = buckets.reduce((sum, b) => sum + b.count, 0);
+
+  if (total === 0) {
+    return <div className="cfsc-dist-empty">No rated problems solved yet.</div>;
+  }
+
+  return (
+    <div className="cfsc-dist">
+      {buckets.map((b) => (
+        <div className="cfsc-dist-row" key={b.label}>
+          <span className="cfsc-dist-label" title={b.label} style={{ color: b.color }}>{b.label}</span>
+          <span className="cfsc-dist-track">
+            <span
+              className="cfsc-dist-fill"
+              style={{ width: `${(b.count / max) * 100}%`, background: b.color }}
+            />
+          </span>
+          <span className="cfsc-dist-count">{b.count}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Header({ title, handle, profileUrl }) {
   const content = (
     <div className="cfsc-header">
       <span className="cfsc-title">
         <CodeforcesLogo />
         {title}
       </span>
-      <span className="cfsc-arrow" aria-hidden="true">→</span>
+      {handle && <span className="cfsc-handle">{handle}</span>}
     </div>
   );
   if (profileUrl) {
@@ -177,10 +254,11 @@ function CodeforcesLogo() {
   );
 }
 
-function RatingGraph({ history, currentRating }) {
+function RatingGraph({ history }) {
   const W = 400;
-  const H = 130;
-  const PAD = { top: 8, right: 8, bottom: 8, left: 8 };
+  const H = 150;
+  const PAD = { top: 10, right: 8, bottom: 10, left: 8 };
+  const [hover, setHover] = useState(null);
 
   const model = useMemo(() => {
     if (!history || history.length === 0) return null;
@@ -199,19 +277,30 @@ function RatingGraph({ history, currentRating }) {
       PAD.left + (history.length === 1 ? innerW / 2 : (i / (history.length - 1)) * innerW);
     const y = (r) => PAD.top + innerH - ((r - lo) / range) * innerH;
 
-    const points = history.map((h, i) => ({ x: x(i), y: y(h.newRating), r: h.newRating, h }));
+    // Each contest carries its rating change ("vector") vs. the previous one.
+    const points = history.map((h, i) => ({
+      x: x(i),
+      y: y(h.newRating),
+      r: h.newRating,
+      delta: i === 0 ? 0 : h.newRating - history[i - 1].newRating,
+    }));
     const line = points.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-    const area = `${PAD.left + 0},${(PAD.top + innerH).toFixed(1)} ${line} ${points[points.length - 1].x.toFixed(1)},${(PAD.top + innerH).toFixed(1)}`;
+    const baseY = PAD.top + innerH;
+    const area = `${points[0].x.toFixed(1)},${baseY.toFixed(1)} ${line} ${points[points.length - 1].x.toFixed(1)},${baseY.toFixed(1)}`;
 
-    return { lo, hi, points, line, area, innerH, y };
+    // Y-axis ticks (rating labels), positioned as a % of the svg height so the
+    // HTML overlay lines up with the stretched svg.
+    const step = Math.max(100, Math.ceil((range / 4) / 100) * 100);
+    const ticks = [];
+    for (let v = lo; v <= hi; v += step) {
+      ticks.push({ value: v, top: (y(v) / H) * 100 });
+    }
+
+    return { lo, hi, points, line, area, y, baseY, ticks };
   }, [history]);
 
   if (!model) {
-    return (
-      <div className="cfsc-graph-wrap">
-        <div className="cfsc-graph-empty">No rated contests yet.</div>
-      </div>
-    );
+    return <div className="cfsc-graph-empty">No rated contests yet.</div>;
   }
 
   // Rating-tier bands (Codeforces colors) clipped to the visible range.
@@ -230,13 +319,20 @@ function RatingGraph({ history, currentRating }) {
 
   return (
     <div className="cfsc-graph-wrap">
-      <svg
-        className="cfsc-graph"
-        viewBox={`0 0 ${W} ${H}`}
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Codeforces contest rating history"
-      >
+      <div className="cfsc-graph-plot">
+        <div className="cfsc-graph-axis" aria-hidden="true">
+          {model.ticks.map((t) => (
+            <span key={t.value} style={{ top: `${t.top}%` }}>{t.value}</span>
+          ))}
+        </div>
+        <div className="cfsc-graph-svg-wrap">
+        <svg
+          className="cfsc-graph"
+          viewBox={`0 0 ${W} ${H}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="Codeforces contest rating history"
+        >
         <defs>
           <linearGradient id="cfsc-area" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--cfsc-line)" stopOpacity="0.35" />
@@ -252,29 +348,79 @@ function RatingGraph({ history, currentRating }) {
           const yTop = model.y(top);
           const yBottom = model.y(bottom);
           return (
-            <rect
-              key={i}
-              x={0}
-              y={yTop}
-              width={W}
-              height={Math.max(0, yBottom - yTop)}
-              fill={b.color}
-              opacity="0.28"
-            />
+            <rect key={i} x={0} y={yTop} width={W} height={Math.max(0, yBottom - yTop)} fill={b.color} opacity="0.28" />
           );
         })}
 
         {/* Area under the curve */}
         <polygon points={model.area} fill="url(#cfsc-area)" />
 
-        {/* Rating line */}
-        <polyline points={model.line} fill="none" stroke="var(--cfsc-line)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-
-        {/* Points */}
+        {/* Per-contest markers: a vertical stem down to the baseline for each
+            competition, so every contest shows as its own "vector". */}
         {model.points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="2.6" fill={rankColor(p.r)} stroke="#fff" strokeWidth="1" />
+          <line
+            key={`stem-${i}`}
+            x1={p.x}
+            y1={p.y}
+            x2={p.x}
+            y2={model.baseY}
+            stroke={rankColor(p.r)}
+            strokeWidth="1"
+            strokeOpacity="0.28"
+            vectorEffect="non-scaling-stroke"
+          />
         ))}
-      </svg>
+
+        {/* Rating line — non-scaling stroke stays crisp when the svg is stretched */}
+        <polyline
+          points={model.line}
+          fill="none"
+          stroke="var(--cfsc-line)"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+
+        {/* Per-contest points, colored by the rating tier reached */}
+        {model.points.map((p, i) => (
+          <circle
+            key={`pt-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r={hover === i ? '5' : '3.4'}
+            fill={rankColor(p.r)}
+            stroke="#fff"
+            strokeWidth="1.5"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+
+        {/* Transparent, larger hit targets for easier hovering */}
+        {model.points.map((p, i) => (
+          <circle
+            key={`hit-${i}`}
+            cx={p.x}
+            cy={p.y}
+            r="9"
+            fill="transparent"
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHover(i)}
+            onMouseLeave={() => setHover((h) => (h === i ? null : h))}
+          />
+        ))}
+        </svg>
+
+        {hover != null && history[hover] && (
+          <ContestTooltip
+            entry={history[hover]}
+            delta={model.points[hover].delta}
+            leftPct={(model.points[hover].x / W) * 100}
+            topPct={(model.points[hover].y / H) * 100}
+          />
+        )}
+        </div>
+      </div>
 
       <div className="cfsc-graph-labels">
         <span>{formatDate(first.ratingUpdateTimeSeconds)}</span>
@@ -285,8 +431,49 @@ function RatingGraph({ history, currentRating }) {
   );
 }
 
+function ContestTooltip({ entry, leftPct, topPct }) {
+  const delta = entry.newRating - entry.oldRating;
+  const up = delta >= 0;
+  // Flip the tooltip below the point when near the top, and anchor its
+  // horizontal edge inward near the left/right of the plot.
+  const below = topPct < 38;
+  const anchorX = leftPct < 22 ? 'left' : leftPct > 78 ? 'right' : 'center';
+  const tx = anchorX === 'left' ? '0' : anchorX === 'right' ? '-100%' : '-50%';
+  const ty = below ? '12px' : 'calc(-100% - 12px)';
+
+  return (
+    <div
+      className="cfsc-tip"
+      style={{ left: `${leftPct}%`, top: `${topPct}%`, transform: `translate(${tx}, ${ty})` }}
+    >
+      <div className="cfsc-tip-title">{entry.contestName}</div>
+      <div className="cfsc-tip-row">
+        <span>Rating</span>
+        <span>
+          {entry.oldRating} → <strong style={{ color: rankColor(entry.newRating) }}>{entry.newRating}</strong>{' '}
+          <span className={up ? 'cfsc-tip-up' : 'cfsc-tip-down'}>({up ? '+' : ''}{delta})</span>
+        </span>
+      </div>
+      <div className="cfsc-tip-row">
+        <span>Rank</span>
+        <span>#{entry.rank}</span>
+      </div>
+      <div className="cfsc-tip-row">
+        <span>Date</span>
+        <span>{formatFullDate(entry.ratingUpdateTimeSeconds)}</span>
+      </div>
+    </div>
+  );
+}
+
 function formatDate(seconds) {
   if (!seconds) return '';
   const d = new Date(seconds * 1000);
   return d.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+}
+
+function formatFullDate(seconds) {
+  if (!seconds) return '';
+  const d = new Date(seconds * 1000);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }

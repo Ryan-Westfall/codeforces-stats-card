@@ -28,3 +28,37 @@ export function rankFromRating(rating) {
   }
   return 'Unrated';
 }
+
+// Problem-rating range boundaries aligned to Codeforces rank thresholds.
+const RATING_BOUNDARIES = [1000, 1200, 1400, 1600, 1900, 2100, 2300, 2400, 2600, 3000];
+
+// Return five numeric rating ranges centered on the user's current rating.
+// Boundaries follow the rank thresholds, and the window's lowest range is an
+// unbounded "< X" and the highest an unbounded "X+", so every solved problem
+// lands somewhere. Each range is colored by the rank tier of its lower bound.
+export function ratingBuckets(rating) {
+  const B = RATING_BOUNDARIES;
+  const r = Number(rating) || 0;
+
+  // Find p so that B[p] <= r < B[p+1] (the lower of the centered pair),
+  // then clamp so the four cut points A < Bc < Cc < D all exist.
+  let p = 0;
+  while (p < B.length - 1 && r >= B[p + 1]) p++;
+  p = Math.max(1, Math.min(p, B.length - 3));
+  const A = B[p - 1];
+  const Bc = B[p];
+  const Cc = B[p + 1];
+  const D = B[p + 2];
+
+  const raw = [
+    { label: `< ${A}`, min: -Infinity, max: A - 1 },
+    { label: `${A}–${Bc}`, min: A, max: Bc - 1 },
+    { label: `${Bc}–${Cc}`, min: Bc, max: Cc - 1 },
+    { label: `${Cc}–${D}`, min: Cc, max: D - 1 },
+    { label: `${D}+`, min: D, max: Infinity },
+  ];
+  return raw.map((x) => ({
+    ...x,
+    color: rankColor(Number.isFinite(x.min) ? x.min : x.max),
+  }));
+}
