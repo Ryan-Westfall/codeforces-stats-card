@@ -125,8 +125,8 @@ a.cfsc-card:hover .cfsc-arrow { transform: translateX(4px); color: var(--cfsc-fg
 
 /* Section 4 — rating history graph (grows to fill remaining height) */
 .cfsc-section--graph { flex: 1 1 auto; min-height: 150px; }
-.cfsc-graph-wrap { display: flex; flex-direction: column; flex: 1 1 auto; }
-.cfsc-graph-plot { display: flex; flex: 1 1 auto; min-height: 130px; }
+.cfsc-graph-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.cfsc-graph-plot { display: flex; flex: 1 1 auto; min-height: 130px; min-width: 0; }
 .cfsc-graph-axis { position: relative; flex: 0 0 2.3rem; }
 .cfsc-graph-axis span {
   position: absolute;
@@ -137,10 +137,12 @@ a.cfsc-card:hover .cfsc-arrow { transform: translateX(4px); color: var(--cfsc-fg
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.cfsc-graph-svg-wrap { position: relative; flex: 1 1 auto; min-height: 130px; display: flex; }
+.cfsc-graph-svg-wrap { position: relative; flex: 1 1 auto; min-height: 130px; min-width: 0; display: flex; }
 .cfsc-graph {
   display: block;
   flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 130px;
   background: var(--cfsc-surface);
   border-radius: 8px;
